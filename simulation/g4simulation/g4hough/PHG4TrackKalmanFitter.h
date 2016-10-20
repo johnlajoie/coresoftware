@@ -51,6 +51,8 @@ public:
 	 */
 	enum OutPutMode {MakeNewNode, OverwriteOriginalNode, DebugMode};
 
+	enum DetectorType {MAPS_TPC, MAPS_IT_TPC, MIE};
+
 	//! Default constructor
 	PHG4TrackKalmanFitter(const std::string &name = "PHG4TrackKalmanFitter");
 
@@ -206,7 +208,7 @@ private:
 	 * \param intrack Input SvtxTrack
 	 * \param invertex Input Vertex, if fit track as a primary vertex
 	 */
-	PHGenFit::Track* ReFitTrack(const SvtxTrack* intrack, const SvtxVertex* invertex = NULL);
+	PHGenFit::Track* ReFitTrack(PHCompositeNode * topNode, const SvtxTrack* intrack, const SvtxVertex* invertex = NULL);
 
 	//! Make SvtxTrack from PHGenFit::Track and SvtxTrack
 	SvtxTrack* MakeSvtxTrack(const SvtxTrack* svtxtrack, const PHGenFit::Track* genfit_track, const SvtxVertex * vertex = NULL);
@@ -218,6 +220,9 @@ private:
 
 	//!flags
 	unsigned int _flags;
+
+	//
+	DetectorType _detector_type;
 
 	//bool _make_separate_nodes;
 	OutPutMode _output_mode;

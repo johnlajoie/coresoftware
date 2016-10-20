@@ -5,51 +5,73 @@
  *  \author		Haiwang Yu <yuhw@nmsu.edu>
  */
 
-#include "PHG4TrackKalmanFitter.h"
-
-#include <fun4all/Fun4AllReturnCodes.h>
-#include <fun4all/PHTFileServer.h>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <utility>
 #include <g4hough/SvtxCluster.h>
 #include <g4hough/SvtxClusterMap.h>
 #include <g4hough/SvtxTrackState_v1.h>
-#include <g4main/PHG4TruthInfoContainer.h>
-#include <g4main/PHG4Particle.h>
 #include <g4main/PHG4Particlev2.h>
+#include <g4main/PHG4TruthInfoContainer.h>
 #include <g4main/PHG4VtxPointv1.h>
-#include <GenFit/FieldManager.h>
-#include <GenFit/GFRaveVertex.h>
-#include <GenFit/GFRaveVertexFactory.h>
-#include <GenFit/MeasuredStateOnPlane.h>
-#include <GenFit/RKTrackRep.h>
-#include <GenFit/StateOnPlane.h>
-#include <GenFit/Track.h>
 #include <phgenfit/Fitter.h>
 #include <phgenfit/PlanarMeasurement.h>
 #include <phgenfit/SpacepointMeasurement.h>
+#include <phgenfit/Track.h>
+#include <phgeom/PHGeomUtility.h>
+#include <fun4all/Fun4AllReturnCodes.h>
+#include <fun4all/PHTFileServer.h>
+#include <GenFit/GFRaveTrackParameters.h>
+#include <GenFit/GFRaveVertexFactory.h>
+#include <GenFit/RKTrackRep.h>
 #include <phool/getClass.h>
 #include <phool/phool.h>
 #include <phool/PHCompositeNode.h>
 #include <phool/PHIODataNode.h>
 #include <phool/PHNodeIterator.h>
+#include <rave/VacuumPropagator.h>
+
+#include <g4detectors/PHG4CylinderCellContainer.h>
+#include <g4detectors/PHG4CylinderGeomContainer.h>
+#include <g4detectors/PHG4CylinderCell_MAPS.h>
+#include <g4detectors/PHG4CylinderGeom_MAPS.h>
+
+#include <g4main/PHG4Particlev2.h>
+#include <g4main/PHG4TruthInfoContainer.h>
+#include <g4main/PHG4VtxPointv1.h>
+#include <GenFit/EventDisplay.h>
+#include <phgenfit/Fitter.h>
+#include <phgenfit/PlanarMeasurement.h>
+#include <phgenfit/SpacepointMeasurement.h>
+#include <phgenfit/Track.h>
 #include <phgeom/PHGeomUtility.h>
-#include <iostream>
-#include <map>
-#include <utility>
-#include <vector>
+#include <g4hough/SvtxCluster.h>
+#include <g4hough/SvtxClusterMap.h>
+#include <g4hough/SvtxHit.h>
+#include <g4hough/SvtxHitMap.h>
+#include <g4hough/SvtxTrackState_v1.h>
+#include <GenFit/Exception.h>
+#include <GenFit/MeasuredStateOnPlane.h>
+#include <GenFit/StateOnPlane.h>
+#include <TClonesArray.h>
+#include <TMatrixDSym.h>
+#include <TMatrixF.h>
+#include <TTree.h>
+#include <TVector3.h>
 
-#include "TClonesArray.h"
-#include "TMatrixDSym.h"
-#include "TTree.h"
-#include "TVector3.h"
-#include "TRandom3.h"
 
-#include "phgenfit/Track.h"
 #include "SvtxTrack.h"
 #include "SvtxTrack_v1.h"
-#include "SvtxVertex_v1.h"
 #include "SvtxTrackMap.h"
 #include "SvtxTrackMap_v1.h"
+#include "SvtxTrackState.h"
+#include "SvtxVertex.h"
+#include "SvtxVertex_v1.h"
+#include "SvtxVertexMap.h"
 #include "SvtxVertexMap_v1.h"
+
+#include "PHG4TrackKalmanFitter.h"
 
 #define LogDebug(exp)		std::cout<<"DEBUG: "<<__FILE__<<": "<<__LINE__<<": "<< #exp <<" : "<< exp <<"\n"
 #define LogError(exp)		std::cout<<"ERROR: "<<__FILE__<<": "<<__LINE__<<": "<< exp <<"\n"
@@ -141,7 +163,7 @@ private:
  * Constructor
  */
 PHG4TrackKalmanFitter::PHG4TrackKalmanFitter(const string &name) :
-		SubsysReco(name), _flags(NONE), _output_mode(OverwriteOriginalNode), _fit_primary_tracks(
+		SubsysReco(name), _flags(NONE), _detector_type(MAPS_TPC), _output_mode(OverwriteOriginalNode), _fit_primary_tracks(
 				true), _mag_field_file_name(
 				"/phenix/upgrades/decadal/fieldmaps/sPHENIX.2d.root"), _mag_field_re_scaling_factor(
 				1.4 / 1.5), _reverse_mag_field(true), _fitter( NULL), _track_fitting_alg_name(
@@ -243,7 +265,7 @@ int PHG4TrackKalmanFitter::process_event(PHCompositeNode *topNode) {
 	for (SvtxTrackMap::Iter iter = _trackmap->begin(); iter != _trackmap->end();
 			++iter) {
 		//! stands for Refit_PHGenFit_Track
-		PHGenFit::Track* rf_phgf_track = ReFitTrack(iter->second);
+		PHGenFit::Track* rf_phgf_track = ReFitTrack(topNode, iter->second);
 #if _DEBUG_MODE_ == 1
 		//rf_phgf_track->getGenFitTrack()->Print();
 #endif
@@ -326,7 +348,7 @@ int PHG4TrackKalmanFitter::process_event(PHCompositeNode *topNode) {
 				/*!
 				 * rf_phgf_track stands for Refit_PHGenFit_Track
 				 */
-				PHGenFit::Track* rf_phgf_track = ReFitTrack(iter->second,
+				PHGenFit::Track* rf_phgf_track = ReFitTrack(topNode, iter->second,
 						vertex);
 				if (rf_phgf_track) {
 					//FIXME figure out which vertex to use.
@@ -617,16 +639,46 @@ int PHG4TrackKalmanFitter::GetNodes(PHCompositeNode * topNode) {
  * \param intrack Input SvtxTrack
  * \param invertex Input Vertex, if fit track as a primary vertex
  */
-PHGenFit::Track* PHG4TrackKalmanFitter::ReFitTrack(const SvtxTrack* intrack,
+PHGenFit::Track* PHG4TrackKalmanFitter::ReFitTrack(PHCompositeNode * topNode, const SvtxTrack* intrack,
 		const SvtxVertex* invertex) {
 	if (!intrack) {
 		cerr << PHWHERE << " Input SvtxTrack is NULL!" << endl;
 		return NULL;
 	}
 
+	PHG4CylinderGeomContainer* geom_container = NULL;
+	PHG4CylinderCellContainer* cells = NULL;
+	SvtxHitMap* hitsmap = NULL;
+
+	if (_detector_type == MAPS_TPC) {
+		// get node containing the digitized hits
+		hitsmap = findNode::getClass<SvtxHitMap>(topNode, "SvtxHitMap");
+		if (!hitsmap) {
+			cout << PHWHERE << "ERROR: Can't find node SvtxHitMap" << endl;
+			return NULL;
+		}
+
+		geom_container = findNode::getClass<PHG4CylinderGeomContainer>(topNode,
+				"CYLINDERGEOM_MAPS");
+		if (!geom_container) {
+			cout << PHWHERE << "ERROR: Can't find node CYLINDERGEOM_MAPS" << endl;
+			return NULL;
+		}
+
+		cells = findNode::getClass<PHG4CylinderCellContainer>(topNode,
+				"G4CELL_MAPS");
+		if (!cells) {
+			cout << PHWHERE << "ERROR: Can't find node G4CELL_MAPS" << endl;
+			return NULL;
+		}
+	}
+
 	// prepare seed from input SvtxTrack
-	TVector3 seed_mom(intrack->get_px(), intrack->get_py(), intrack->get_pz());
-	TVector3 seed_pos(intrack->get_x(), intrack->get_y(), intrack->get_z());
+//	TVector3 seed_mom(intrack->get_px(), intrack->get_py(), intrack->get_pz());
+//	TVector3 seed_pos(intrack->get_x(), intrack->get_y(), intrack->get_z());
+	//TODO check initial seed setup later
+	TVector3 seed_mom(100,0,0);
+	TVector3 seed_pos(0,0,0);
 	TMatrixDSym seed_cov(6);
 	for (int i = 0; i < 6; i++) {
 		for (int j = 0; j < 6; j++) {
@@ -737,6 +789,7 @@ PHGenFit::Track* PHG4TrackKalmanFitter::ReFitTrack(const SvtxTrack* intrack,
 	}
 #endif
 
+	//cout<<"=======================DEBUG: event: "<<_event <<endl;
 	for (SvtxTrack::ConstClusterIter iter = intrack->begin_clusters();
 			iter != intrack->end_clusters(); ++iter) {
 		unsigned int cluster_id = *iter;
@@ -747,10 +800,36 @@ PHGenFit::Track* PHG4TrackKalmanFitter::ReFitTrack(const SvtxTrack* intrack,
 		}
 		//cluster->identify(); //DEBUG
 
-		//unsigned int l = cluster->get_layer();
-
 		TVector3 pos(cluster->get_x(), cluster->get_y(), cluster->get_z());
 		TVector3 n(cluster->get_x(), cluster->get_y(), 0);
+
+		unsigned int layer = cluster->get_layer();
+		//std::cout << "cluster layer: " << layer << std::endl;
+		if (_detector_type == MAPS_TPC and layer < 3) {
+
+			unsigned int begin_hit_id = *(cluster->begin_hits());
+			//LogDebug(begin_hit_id);
+			SvtxHit* hit = hitsmap->find(begin_hit_id)->second;
+			//LogDebug(hit->get_cellid());
+			PHG4CylinderCell_MAPS* cell = (PHG4CylinderCell_MAPS*) cells->findCylinderCell(hit->get_cellid());
+		    int stave_index = cell->get_stave_index();
+		    int half_stave_index = cell->get_half_stave_index();
+		    int module_index = cell->get_module_index();
+		    int chip_index = cell->get_chip_index();
+
+			double ladder_location[3] = { 0.0, 0.0, 0.0 };
+			PHG4CylinderGeom_MAPS *geom =
+					(PHG4CylinderGeom_MAPS*) geom_container->GetLayerGeom(
+							layer);
+			// returns the center of the sensor in world coordinates - used to get the ladder phi location
+			geom->find_sensor_center(stave_index, half_stave_index,
+					module_index, chip_index, ladder_location);
+			//n.Print();
+			n.SetXYZ(ladder_location[0],ladder_location[1],0);
+			double phitilt = 0.304;   // radians, equivalent to 17.4 degrees
+			n.RotateZ(phitilt);
+			//n.Print();
+		}
 
 		//TODO use u, v explicitly?
 		PHGenFit::Measurement* meas = new PHGenFit::PlanarMeasurement(pos, n,
